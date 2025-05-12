@@ -445,3 +445,135 @@
         (ok project-data)
     )
 )
+
+
+(define-constant err-invalid-salary (err u106))
+
+(define-map SalaryHistory
+    {employee: principal, company: principal, year: uint}
+    {
+        salary-range-hash: (buff 32),
+        currency: (string-ascii 3),
+        verified: bool
+    }
+)
+
+(define-public (add-salary-history 
+    (company principal)
+    (year uint)
+    (salary-range-hash (buff 32))
+    (currency (string-ascii 3)))
+    (let ((employee tx-sender))
+        (ok (map-set SalaryHistory
+            {employee: employee, company: company, year: year}
+            {
+                salary-range-hash: salary-range-hash,
+                currency: currency,
+                verified: false
+            }))
+    )
+)
+
+(define-public (verify-salary-history 
+    (employee principal)
+    (year uint))
+    (let (
+        (company tx-sender)
+        (salary-entry (map-get? SalaryHistory {employee: employee, company: company, year: year}))
+    )
+        (asserts! (is-some salary-entry) err-not-found)
+        (ok (map-set SalaryHistory
+            {employee: employee, company: company, year: year}
+            (merge (unwrap-panic salary-entry) {verified: true})))
+    )
+)
+
+(define-public (get-salary-history (employee principal) (company principal) (year uint))
+    (let ((salary-data (map-get? SalaryHistory {employee: employee, company: company, year: year})))
+        (ok salary-data)
+    )
+)
+(define-public (get-employee-salary-history (employee principal))
+    (let ((salary-data (map-get? SalaryHistory {employee: employee, company: tx-sender, year: u0})))
+        (ok salary-data)
+    )
+)
+(define-public (get-company-salary-history (company principal))
+    (let ((salary-data (map-get? SalaryHistory {employee: tx-sender, company: company, year: u0})))
+        (ok salary-data)
+    )
+)
+(define-public (get-employee-salary-history-by-year (employee principal) (year uint))
+    (let ((salary-data (map-get? SalaryHistory {employee: employee, company: tx-sender, year: year})))
+        (ok salary-data)
+    )
+)
+(define-public (get-company-salary-history-by-year (company principal) (year uint))
+    (let ((salary-data (map-get? SalaryHistory {employee: tx-sender, company: company, year: year})))
+        (ok salary-data)
+    )
+)
+(define-public (get-employee-salary-history-by-company (employee principal) (company principal))
+    (let ((salary-data (map-get? SalaryHistory {employee: employee, company: company, year: u0})))
+        (ok salary-data)
+    )
+)
+
+
+(define-map Achievements
+    {achievement-id: uint, company: principal}
+    {
+        name: (string-ascii 50),
+        description: (string-ascii 200),
+        category: (string-ascii 30)
+    }
+)
+
+(define-map EmployeeAchievements
+    {employee: principal, achievement-id: uint}
+    {
+        awarded-date: uint,
+        awarded-by: principal,
+        evidence-hash: (buff 32)
+    }
+)
+
+(define-data-var achievement-id-nonce uint u0)
+
+(define-public (create-achievement
+    (name (string-ascii 50))
+    (description (string-ascii 200))
+    (category (string-ascii 30)))
+    (let (
+        (company tx-sender)
+        (new-id (+ (var-get achievement-id-nonce) u1))
+    )
+        (var-set achievement-id-nonce new-id)
+        (ok (map-set Achievements
+            {achievement-id: new-id, company: company}
+            {
+                name: name,
+                description: description,
+                category: category
+            }))
+    )
+)
+
+(define-public (award-achievement
+    (employee principal)
+    (achievement-id uint)
+    (evidence-hash (buff 32)))
+    (let (
+        (company tx-sender)
+        (achievement (map-get? Achievements {achievement-id: achievement-id, company: company}))
+    )
+        (asserts! (is-some achievement) err-not-found)
+        (ok (map-set EmployeeAchievements
+            {employee: employee, achievement-id: achievement-id}
+            {
+                awarded-date: stacks-block-height,
+                awarded-by: company,
+                evidence-hash: evidence-hash
+            }))
+    )
+)
