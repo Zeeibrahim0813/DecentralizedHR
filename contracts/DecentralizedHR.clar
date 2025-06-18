@@ -577,3 +577,177 @@
             }))
     )
 )
+
+(define-constant err-reputation-calculation-failed (err u107))
+(define-constant err-insufficient-data (err u108))
+
+(define-map EmployeeReputation
+    principal
+    {
+        overall-score: uint,
+        work-history-score: uint,
+        performance-score: uint,
+        skill-endorsement-score: uint,
+        achievement-score: uint,
+        last-updated: uint,
+        total-verifications: uint
+    }
+)
+
+(define-map ReputationWeights
+    (string-ascii 20)
+    uint
+)
+
+(define-public (initialize-reputation-weights)
+    (begin
+        (map-set ReputationWeights "work-history" u25)
+        (map-set ReputationWeights "performance" u30)
+        (map-set ReputationWeights "endorsements" u25)
+        (map-set ReputationWeights "achievements" u20)
+        (ok true)
+    )
+)
+
+(define-private (calculate-work-history-score (employee principal))
+    (let (
+        (sample-history (get-work-history employee tx-sender))
+        (base-score u50)
+    )
+        (if (is-some sample-history)
+            (if (get verified (unwrap-panic sample-history))
+                u80
+                u40)
+            u20)
+    )
+)
+
+(define-private (calculate-performance-score (employee principal))
+    (let (
+        (sample-review (map-get? PerformanceReviews {employee: employee, review-id: u1}))
+        (base-score u50)
+    )
+        (if (is-some sample-review)
+            (let ((rating (get rating (unwrap-panic sample-review))))
+                (* rating u20))
+            u30)
+    )
+)
+
+(define-private (calculate-endorsement-score (employee principal))
+    (let (
+        (sample-endorsement (map-get? SkillEndorsements {employee: employee, skill: "programming"}))
+        (base-score u40)
+    )
+        (if (is-some sample-endorsement)
+            (let ((count (get endorsement-count (unwrap-panic sample-endorsement))))
+                (+ base-score (* count u10)))
+            base-score)
+    )
+)
+
+(define-private (calculate-achievement-score (employee principal))
+    (let (
+        (sample-achievement (map-get? EmployeeAchievements {employee: employee, achievement-id: u1}))
+        (base-score u30)
+    )
+        (if (is-some sample-achievement)
+            u70
+            base-score)
+    )
+)
+
+(define-public (calculate-reputation-score (employee principal))
+    (let (
+        (work-score (calculate-work-history-score employee))
+        (perf-score (calculate-performance-score employee))
+        (endorse-score (calculate-endorsement-score employee))
+        (achieve-score (calculate-achievement-score employee))
+        (work-weight (default-to u25 (map-get? ReputationWeights "work-history")))
+        (perf-weight (default-to u30 (map-get? ReputationWeights "performance")))
+        (endorse-weight (default-to u25 (map-get? ReputationWeights "endorsements")))
+        (achieve-weight (default-to u20 (map-get? ReputationWeights "achievements")))
+        (weighted-total (+ 
+            (/ (* work-score work-weight) u100)
+            (/ (* perf-score perf-weight) u100)
+            (/ (* endorse-score endorse-weight) u100)
+            (/ (* achieve-score achieve-weight) u100)))
+        (verification-count (+ 
+            (if (> work-score u50) u1 u0)
+            (if (> perf-score u50) u1 u0)
+            (if (> endorse-score u50) u1 u0)
+            (if (> achieve-score u50) u1 u0)))
+    )
+        (map-set EmployeeReputation
+            employee
+            {
+                overall-score: weighted-total,
+                work-history-score: work-score,
+                performance-score: perf-score,
+                skill-endorsement-score: endorse-score,
+                achievement-score: achieve-score,
+                last-updated: stacks-block-height,
+                total-verifications: verification-count
+            })
+        (ok weighted-total)
+    )
+)
+
+(define-public (update-employee-reputation (employee principal))
+    (let (
+        (employee-data (map-get? Employees employee))
+        (current-reputation (calculate-reputation-score employee))
+    )
+        (asserts! (is-some employee-data) err-not-found)
+        (asserts! (is-ok current-reputation) err-reputation-calculation-failed)
+        (ok (unwrap-panic current-reputation))
+    )
+)
+
+(define-read-only (get-employee-reputation (employee principal))
+    (map-get? EmployeeReputation employee)
+)
+
+(define-read-only (get-reputation-breakdown (employee principal))
+    (let ((reputation-data (map-get? EmployeeReputation employee)))
+        (if (is-some reputation-data)
+            (ok {
+                overall: (get overall-score (unwrap-panic reputation-data)),
+                work-history: (get work-history-score (unwrap-panic reputation-data)),
+                performance: (get performance-score (unwrap-panic reputation-data)),
+                endorsements: (get skill-endorsement-score (unwrap-panic reputation-data)),
+                achievements: (get achievement-score (unwrap-panic reputation-data)),
+                verifications: (get total-verifications (unwrap-panic reputation-data))
+            })
+            err-not-found)
+    )
+)
+
+
+
+(define-public (verify-reputation-authenticity (employee principal))
+    (let (
+        (reputation-data (map-get? EmployeeReputation employee))
+        (employee-data (map-get? Employees employee))
+    )
+        (asserts! (is-some reputation-data) err-not-found)
+        (asserts! (is-some employee-data) err-not-found)
+        (ok {
+            is-verified: (get verified (unwrap-panic employee-data)),
+            last-updated: (get last-updated (unwrap-panic reputation-data)),
+            verification-count: (get total-verifications (unwrap-panic reputation-data))
+        })
+    )
+)
+
+(define-public (set-reputation-weight (category (string-ascii 20)) (weight uint))
+    (begin
+        (asserts! (is-eq tx-sender contract-owner) err-not-authorized)
+        (asserts! (<= weight u100) err-invalid-status)
+        (ok (map-set ReputationWeights category weight))
+    )
+)
+
+(define-read-only (get-reputation-weight (category (string-ascii 20)))
+    (map-get? ReputationWeights category)
+)
