@@ -723,8 +723,6 @@
     )
 )
 
-
-
 (define-public (verify-reputation-authenticity (employee principal))
     (let (
         (reputation-data (map-get? EmployeeReputation employee))
